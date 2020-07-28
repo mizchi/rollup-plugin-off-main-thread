@@ -1,8 +1,9 @@
-import omt from "../index";
+import omt, { replaceWorkerPathToInlineWorker } from "../index";
 import memfs from "memfs/lib/promises";
 import { Volume } from "memfs";
 import { memfsPlugin } from "rollup-plugin-memfs";
-import { rollup } from "rollup";
+import { rollup, OutputChunk } from "rollup";
+import assert from "assert";
 
 const fs = memfs(
   Volume.fromJSON({
@@ -11,18 +12,28 @@ const fs = memfs(
   })
 );
 
-test("xxx", async () => {
+test("build", async () => {
   const rolled = await rollup({
     input: "/index.js",
-    plugins: [
-      memfsPlugin(fs as any),
-      omt({
-        // publicPath: "./",
-      }),
-    ],
+    plugins: [memfsPlugin(fs as any), omt({})],
   });
   const gen = await rolled.generate({
     format: "es",
   });
-  console.log(gen.output);
+  const code = gen.output[0].code;
+  assert.ok(code.includes('new Worker("./'));
+});
+
+test("build inline", async () => {
+  const rolled = await rollup({
+    input: "/index.js",
+    plugins: [memfsPlugin(fs as any), omt({})],
+  });
+  const gen = await rolled.generate({
+    format: "es",
+  });
+  const chunks = gen.output.filter((o) => o.type === "chunk") as OutputChunk[];
+  const main = chunks.find((e) => e.fileName === "index.js")!.code;
+  const inlined = replaceWorkerPathToInlineWorker(main, chunks);
+  assert.ok(inlined.includes("URL.createObjectURL(new Blob("));
 });

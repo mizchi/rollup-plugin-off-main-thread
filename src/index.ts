@@ -11,7 +11,7 @@
  * limitations under the License.
  */
 
-import { PluginImpl } from "rollup";
+import { PluginImpl, OutputChunk } from "rollup";
 import MagicString from "magic-string";
 
 type Options = {
@@ -23,11 +23,9 @@ const defaultOpts = {
   urlLoaderScheme: "omt",
 };
 
-const plugin: PluginImpl<Partial<Options>>  = function (opts = {}) {
+const plugin: PluginImpl<Partial<Options>> = (opts = {}) => {
   const optsWithDefault: typeof defaultOpts = Object.assign({}, defaultOpts, opts);
-
   const urlLoaderPrefix = optsWithDefault.urlLoaderScheme + ":";
-
   let workerFiles;
   return {
     name: "off-main-thread",
@@ -89,6 +87,7 @@ const plugin: PluginImpl<Partial<Options>>  = function (opts = {}) {
         if (!resolvedWorkerFile) {
           throw Error(`Cannot find module '${workerFile}'`);
         }
+
         workerFiles.push(resolvedWorkerFile);
         const chunkRefId = this.emitFile({
           id: resolvedWorkerFile,
@@ -121,3 +120,24 @@ const plugin: PluginImpl<Partial<Options>>  = function (opts = {}) {
 };
 
 export default plugin
+
+// hepler
+const workerRegexp = /new Worker\(["'](.+?)["']\s?(,\s?\s?\{.*\})?\)/;
+export function replaceWorkerPathToInlineWorker(code: string, chunks: OutputChunk[]) {
+  let current = code;
+  while (true) {
+    const m = current.match(workerRegexp);
+    if (m == null) {
+      break;
+    }
+    const [matched, id] = m;
+    const workerCode = chunks.find((e) => id.includes(e.fileName))!.code;
+    const newWorkerCode = replaceWorkerPathToInlineWorker(workerCode, chunks);
+    const escaped = newWorkerCode.replace(/\`/g, '\\`');
+    current = current.replace(
+      matched,
+      `new Worker(URL.createObjectURL(new Blob([\`${escaped}\`])))`
+    );
+  }
+  return current;
+}
